@@ -792,8 +792,12 @@ public class MemoryRecordsBuilder {
 
         // For passthrough V2, ensure one producerBatch only has one DefaultRecordBatch, and since
         // in this case, DefaultRecordBatch is the value part of a DefaultRecord, so we only allow one record
-        if (magic >= RecordBatch.MAGIC_VALUE_V2 && usePassthrough)
+        // For passthrough V1, ideally we can append multiple passthrough records to the same batch, it
+        // will not work when we are migrating from V1 to V2 message format as we cannot append V1 and V2 messages
+        // in the same batch.
+        if (usePassthrough) {
             return false;
+        }
 
         final int recordSize;
         if (magic < RecordBatch.MAGIC_VALUE_V2) {

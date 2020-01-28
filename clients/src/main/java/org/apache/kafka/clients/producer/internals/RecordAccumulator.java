@@ -69,6 +69,8 @@ import org.slf4j.Logger;
  */
 public final class RecordAccumulator {
 
+    private static final String PASS_THROUGH_MAGIC_VALUE = "__passThroughMagicValue";
+
     private final Logger log;
     private volatile boolean closed;
     private final AtomicInteger flushesInProgress;
@@ -220,6 +222,20 @@ public final class RecordAccumulator {
                 if (appendResult != null) {
                     // Somebody else found us a batch, return the one we waited for! Hopefully this doesn't happen often...
                     return appendResult;
+                }
+
+                // HOTFIX for enabling mirroring data with passthrough compression with mixed message format
+                // In PassThrough mode, KMM will set a header with key = "__passThroughMagicValue" and value = magic byte of the message.
+                // This code enables passthrough were source is in 0.10 format and destination is in 2.0 format (not the other way round).
+                if (compression.equals(CompressionType.PASSTHROUGH)) {
+                    for (Header header : headers) {
+                        if (header.key().equals(PASS_THROUGH_MAGIC_VALUE)) {
+                            byte srcMagicValue = header.value()[0];
+                            if (maxUsableMagic > srcMagicValue) {
+                                maxUsableMagic = srcMagicValue;
+                            }
+                        }
+                    }
                 }
 
                 MemoryRecordsBuilder recordsBuilder = recordsBuilder(buffer, maxUsableMagic);
