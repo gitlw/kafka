@@ -715,9 +715,24 @@ abstract class AbstractFetcherThread(name: String,
     } finally partitionMapLock.unlock()
   }
 
+  def partitionCount(): Int = {
+    partitionMapLock.lockInterruptibly()
+    try partitionStates.size
+    finally partitionMapLock.unlock()
+  }
+
   // Visible for testing
   private[server] def fetchState(topicPartition: TopicPartition): Option[PartitionFetchState] = inLock(partitionMapLock) {
     Option(partitionStates.stateValue(topicPartition))
+  }
+
+  private[server] def partitionsAndOffsets: Map[TopicPartition, InitialFetchState] = inLock(partitionMapLock) {
+    partitionStates.partitionStates.asScala.map { state =>
+      val initialFetchState = InitialFetchState(sourceBroker,
+        currentLeaderEpoch = state.value.currentLeaderEpoch,
+        initOffset = state.value.fetchOffset)
+      state.topicPartition -> initialFetchState
+    }.toMap
   }
 
   protected def toMemoryRecords(records: Records): MemoryRecords = {
