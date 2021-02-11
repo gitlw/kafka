@@ -116,9 +116,18 @@ abstract class AbstractFetcherThread(name: String,
     maybeFetch()
   }
 
+  @volatile var highestLockHoldMs = -1L
+  def recordAndMaybeLogLockHolding(lockHoldMs : Long, msg : String): Unit = {
+    if (lockHoldMs > highestLockHoldMs) {
+      highestLockHoldMs = lockHoldMs
+      info(msg)
+    }
+  }
+
   private def maybeFetch(): Unit = {
-    val opStart = System.currentTimeMillis()
     val (fetchStates, fetchRequestOpt) = inLock(partitionMapLock) {
+      var opStart = System.currentTimeMillis()
+      var hasBackOff = false
       val fetchStates = partitionStates.partitionStateMap.asScala
       val ResultWithPartitions(fetchRequestOpt, partitionsWithError) = buildFetch(fetchStates)
 
@@ -126,13 +135,19 @@ abstract class AbstractFetcherThread(name: String,
 
       if (fetchRequestOpt.isEmpty) {
         trace(s"There are no active partitions. Back off for $fetchBackOffMs ms before sending a fetch request")
+        val timeToAcquireLock = System.currentTimeMillis() - opStart
+
+        recordAndMaybeLogLockHolding(timeToAcquireLock, "buildFetch time 0 holding the lock " + timeToAcquireLock +
+          " has backoff true" )
         partitionMapCond.await(fetchBackOffMs, TimeUnit.MILLISECONDS)
+        opStart = System.currentTimeMillis()
+        hasBackOff = true
       }
 
+      val timeToAcquireLock = System.currentTimeMillis() - opStart
+      recordAndMaybeLogLockHolding(timeToAcquireLock, "buildFetch time 1 holding the lock " + timeToAcquireLock + " has backoff " + hasBackOff)
       (fetchStates, fetchRequestOpt)
     }
-    val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("buildFetch time holding the lock " + timeToAcquireLock)
 
     fetchRequestOpt.foreach { fetchRequest =>
       processFetchRequest(fetchStates, fetchRequest)
@@ -151,9 +166,8 @@ abstract class AbstractFetcherThread(name: String,
    * Builds offset for leader epoch requests for partitions that are in the truncating phase based
    * on latest epochs of the future replicas (the one that is fetching)
    */
-  private def fetchTruncatingPartitions(): (Map[TopicPartition, EpochData], Set[TopicPartition]) = {
+  private def fetchTruncatingPartitions(): (Map[TopicPartition, EpochData], Set[TopicPartition]) = inLock(partitionMapLock) {
     val opStart = System.currentTimeMillis()
-    val result = inLock(partitionMapLock) {
     val partitionsWithEpochs = mutable.Map.empty[TopicPartition, EpochData]
     val partitionsWithoutEpochs = mutable.Set.empty[TopicPartition]
 
@@ -171,11 +185,10 @@ abstract class AbstractFetcherThread(name: String,
       }
     })
 
-    (partitionsWithEpochs, partitionsWithoutEpochs)
-  }
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("fetchTruncatingPartitions time holding the lock " + timeToAcquireLock)
-    result
+    recordAndMaybeLogLockHolding(timeToAcquireLock, "fetchTruncatingPartitions time holding the lock " + timeToAcquireLock)
+
+    (partitionsWithEpochs, partitionsWithoutEpochs)
   }
 
   private def maybeTruncate(): Unit = {
@@ -236,7 +249,7 @@ abstract class AbstractFetcherThread(name: String,
       updateFetchOffsetAndMaybeMarkTruncationComplete(fetchOffsets)
     }
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("truncateToEpochEndOffsets time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock, "truncateToEpochEndOffsets time holding the lock " + timeToAcquireLock)
   }
 
   // Visible for testing
@@ -260,7 +273,7 @@ abstract class AbstractFetcherThread(name: String,
       updateFetchOffsetAndMaybeMarkTruncationComplete(fetchOffsets)
     }
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("truncateToHighWatermark time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock, "truncateToHighWatermark time holding the lock " + timeToAcquireLock)
   }
 
   private def maybeTruncateToEpochEndOffsets(fetchedEpochs: Map[TopicPartition, EpochEndOffset],
@@ -312,7 +325,7 @@ abstract class AbstractFetcherThread(name: String,
       }
     }
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("onPartitionFenced time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock,"onPartitionFenced time holding the lock " + timeToAcquireLock)
     result
   }
 
@@ -335,10 +348,10 @@ abstract class AbstractFetcherThread(name: String,
             // there is an error occurred while fetching partitions, sleep a while
             // note that `ReplicaFetcherThread.handlePartitionsWithError` will also introduce the same delay for every
             // partition with error effectively doubling the delay. It would be good to improve this.
+            val timeToAcquireLock = System.currentTimeMillis() - opStart
+            recordAndMaybeLogLockHolding(timeToAcquireLock,"processFetchRequest with throwable time holding the lock " + timeToAcquireLock)
             partitionMapCond.await(fetchBackOffMs, TimeUnit.MILLISECONDS)
           }
-          val timeToAcquireLock = System.currentTimeMillis() - opStart
-          info("processFetchRequest with throwable time holding the lock " + timeToAcquireLock)
         }
     }
     fetcherStats.requestRate.mark()
@@ -347,12 +360,13 @@ abstract class AbstractFetcherThread(name: String,
       // process fetched data
       val opStart = System.currentTimeMillis()
       inLock(partitionMapLock) {
+
         responseData.foreach { case (topicPartition, partitionData) =>
           Option(partitionStates.stateValue(topicPartition)).foreach { currentFetchState =>
             // It's possible that a partition is removed and re-added or truncated when there is a pending fetch request.
             // In this case, we only want to process the fetch response if the partition state is ready for fetch and
             // the current offset is the same as the offset requested.
-            val fetchState = fetchStates(topicPartition)
+
             if (fetchState.fetchOffset == currentFetchState.fetchOffset && currentFetchState.isReadyForFetch) {
               val requestEpoch = if (fetchState.currentLeaderEpoch >= 0)
                 Some(fetchState.currentLeaderEpoch)
@@ -431,7 +445,7 @@ abstract class AbstractFetcherThread(name: String,
         }
       }
       val timeToAcquireLock = System.currentTimeMillis() - opStart
-      info("processPartitionData time holding the lock " + timeToAcquireLock)
+      recordAndMaybeLogLockHolding(timeToAcquireLock,"processPartitionData time holding the lock " + timeToAcquireLock)
     }
 
     if (partitionsWithError.nonEmpty) {
@@ -451,7 +465,7 @@ abstract class AbstractFetcherThread(name: String,
       }
     } finally partitionMapLock.unlock()
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("markPartitionsForTruncation time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock,"markPartitionsForTruncation time holding the lock " + timeToAcquireLock)
   }
 
   private def markPartitionFailed(topicPartition: TopicPartition): Unit = {
@@ -463,7 +477,7 @@ abstract class AbstractFetcherThread(name: String,
     } finally partitionMapLock.unlock()
     warn(s"Partition $topicPartition marked as failed")
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("markPartitionFailed time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock, "markPartitionFailed time holding the lock " + timeToAcquireLock)
   }
 
   def addPartitions(initialFetchStates: Map[TopicPartition, OffsetAndEpoch]): Set[TopicPartition] = {
@@ -592,7 +606,7 @@ abstract class AbstractFetcherThread(name: String,
       }
     }
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("getOffsetTruncationState time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock, "getOffsetTruncationState time holding the lock " + timeToAcquireLock)
     result
   }
 
@@ -698,7 +712,7 @@ abstract class AbstractFetcherThread(name: String,
       partitionMapCond.signalAll()
     } finally partitionMapLock.unlock()
     val timeToAcquireLock = System.currentTimeMillis() - opStart
-    info("delayPartitions time holding the lock " + timeToAcquireLock)
+    recordAndMaybeLogLockHolding(timeToAcquireLock,"delayPartitions time holding the lock " + timeToAcquireLock)
   }
 
   def removePartitions(topicPartitions: Set[TopicPartition]): Unit = {
