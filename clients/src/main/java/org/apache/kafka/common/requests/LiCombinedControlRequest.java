@@ -132,11 +132,9 @@ public class LiCombinedControlRequest extends AbstractControlRequest {
             for (LiCombinedControlRequestData.LeaderAndIsrPartitionState leaderAndIsrPartitionState : leaderAndIsrPartitionStates) {
                 bld.append("\t" + leaderAndIsrPartitionState + "\n");
             }
-            bld.append("leaderAndIsrLiveLeaders=(\n");
+            bld.append("leaderAndIsrLiveLeaders=\n");
 
-            for (Node leader: leaderAndIsrLiveLeaders) {
-                bld.append(Utils.join(leaderAndIsrLiveLeaders, ", ") + "\n");
-            }
+            bld.append("\t" + Utils.join(leaderAndIsrLiveLeaders, ", ") + "\n");
 
             bld.append("updateMetadataLiveBrokers=\n");
             for (LiCombinedControlRequestData.UpdateMetadataBroker broker: updateMetadataLiveBrokers) {
@@ -149,7 +147,6 @@ public class LiCombinedControlRequest extends AbstractControlRequest {
             }
 
             return bld.toString();
-
         }
 
         /**
@@ -245,18 +242,9 @@ public class LiCombinedControlRequest extends AbstractControlRequest {
         return new LiCombinedControlResponse(responseData);
     }
 
-    /**
-     * Note that this method has allocation overhead per iterated element, so callers should copy the result into
-     * another collection if they need to iterate more than once.
-     *
-     * Implementation note: we should strive to avoid allocation overhead per element, see
-     * `UpdateMetadataRequest.partitionStates()` for the preferred approach. That's not possible in this case and
-     * StopReplicaRequest should be relatively rare in comparison to other request types.
-     */
     private List<LiCombinedControlRequestData.StopReplicaPartitionState> stopReplicaPartitions() {
         return data.stopReplicaPartitionStates();
     }
-
 
     @Override
     public int controllerId() {
@@ -296,7 +284,7 @@ public class LiCombinedControlRequest extends AbstractControlRequest {
         return data.liveBrokers();
     }
 
-    public List<LiCombinedControlRequestData.StopReplicaPartitionState> stopReplicaPartitionStatespartitions() {
+    public List<LiCombinedControlRequestData.StopReplicaPartitionState> stopReplicaPartitionStates() {
         return data.stopReplicaPartitionStates();
     }
 

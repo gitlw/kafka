@@ -54,12 +54,6 @@
       "fields": [
       { "name": "Id", "type": "int32", "versions": "0+", "entityType": "brokerId",
         "about": "The broker id." },
-      // Version 0 of the protocol only allowed specifying a single host and
-      // port per broker, rather than an array of endpoints.
-      { "name": "V0Host", "type": "string", "versions": "0", "ignorable": true,
-        "about": "The broker hostname." },
-      { "name": "V0Port", "type": "int32", "versions": "0", "ignorable": true,
-        "about": "The broker port." },
       { "name": "Endpoints", "type": "[]UpdateMetadataEndpoint", "versions": "0+", "ignorable": true,
         "about": "The broker endpoints.", "fields": [
         { "name": "Port", "type": "int32", "versions": "0+",

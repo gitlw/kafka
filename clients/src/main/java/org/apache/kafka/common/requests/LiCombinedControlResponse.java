@@ -125,10 +125,6 @@ public class LiCombinedControlResponse extends AbstractResponse {
         return result;
     }
 
-    public static LeaderAndIsrResponse parse(ByteBuffer buffer, short version) {
-        return new LeaderAndIsrResponse(ApiKeys.LEADER_AND_ISR.parseResponse(version, buffer), version);
-    }
-
     @Override
     protected Struct toStruct(short version) {
         return data.toStruct(version);
