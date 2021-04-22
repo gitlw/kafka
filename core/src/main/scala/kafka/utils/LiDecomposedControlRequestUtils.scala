@@ -73,7 +73,7 @@ object LiDecomposedControlRequestUtils {
   // extractStopReplicaRequest could possible return two StopReplicaRequests
   // the first one with the deletePartitions field set to true, and the second one with the deletePartitions field set to false
   private def extractStopReplicaRequest(request: LiCombinedControlRequest, brokerEpoch: Long, config: KafkaConfig): List[StopReplicaRequest] = {
-    val partitionsInRequest = request.stopReplicaPartitionStatespartitions()
+    val partitionsInRequest = request.stopReplicaPartitionStates()
 
     val effectivePartitionStates = new util.ArrayList[LiCombinedControlRequestData.StopReplicaPartitionState]()
     partitionsInRequest.forEach{partition =>
