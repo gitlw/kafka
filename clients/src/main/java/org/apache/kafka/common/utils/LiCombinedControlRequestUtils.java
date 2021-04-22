@@ -150,8 +150,6 @@ public class LiCombinedControlRequestUtils {
                     .setSecurityProtocol(endpoint.securityProtocol())));
 
         return new UpdateMetadataRequestData.UpdateMetadataBroker().setId(broker.id())
-            .setV0Host(broker.v0Host())
-            .setV0Port(broker.v0Port())
             .setEndpoints(endpoints)
             .setRack(broker.rack());
     }
