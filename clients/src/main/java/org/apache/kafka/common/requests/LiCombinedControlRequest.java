@@ -140,6 +140,11 @@ public class LiCombinedControlRequest extends AbstractControlRequest {
             for (LiCombinedControlRequestData.UpdateMetadataBroker broker: updateMetadataLiveBrokers) {
                 bld.append("\t" + broker + "\n");
             }
+            bld.append("updateMetadataPartitions=\n");
+            for (LiCombinedControlRequestData.UpdateMetadataPartitionState partitionState: updateMetadataPartitionStates) {
+                bld.append("\t" + partitionState + "\n");
+            }
+
 
             bld.append("stopReplicaPartitions=\n");
             for (LiCombinedControlRequestData.StopReplicaPartitionState partitionState: stopReplicaPartitions) {

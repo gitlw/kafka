@@ -136,6 +136,7 @@ public class UpdateMetadataRequest extends AbstractControlRequest {
                 append(", controllerEpoch=").append(controllerEpoch).
                 append(", brokerEpoch=").append(brokerEpoch).
                 append(", maxBrokerEpoch=").append(maxBrokerEpoch).
+                append(", partitionStates=").append(partitionStates).
                 append(", liveBrokers=").append(Utils.join(liveBrokers, ", ")).
                 append(")");
 
