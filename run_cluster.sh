@@ -9,12 +9,12 @@ ps -ef|grep -E "zookeeper|kafka"|grep -v grep|awk '{print $2}'|xargs kill -9
 
 (rm -rf /tmp/zookeeper /tmp/kafka-logs* || echo "no data to clear")
 
-./bin/zookeeper-server-start.sh  config/zookeeper.properties &
+./bin/zookeeper-server-start.sh  config/zookeeper.properties &> /dev/null &
 
 sleep 10
 
-env LOG_DIR=./logs0 ./bin/kafka-server-start.sh config/server0.properties &
+env LOG_DIR=./logs0 ./bin/kafka-server-start.sh config/server0.properties &>/dev/null &
 
-env LOG_DIR=./logs1 ./bin/kafka-server-start.sh config/server1.properties &
+env LOG_DIR=./logs1 ./bin/kafka-server-start.sh config/server1.properties &>/dev/null &
 
 
