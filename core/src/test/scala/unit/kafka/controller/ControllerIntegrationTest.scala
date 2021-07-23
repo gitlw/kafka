@@ -693,8 +693,8 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     )
 
     // now try to shutdown a 2nd broker
-    val controllerId = zkClient.getControllerId.get
-    val controller = servers.find(p => p.config.brokerId == controllerId).get.kafkaController
+    var controllerId = zkClient.getControllerId.get
+    var controller = servers.find(p => p.config.brokerId == controllerId).get.kafkaController
     val resultQueue = new LinkedBlockingQueue[Try[collection.Set[TopicPartition]]]()
     val controlledShutdownCallback = (controlledShutdownResult: Try[collection.Set[TopicPartition]]) => resultQueue.put(controlledShutdownResult)
     controller.controlledShutdown(0, servers.find(_.config.brokerId == 0).get.kafkaController.brokerEpoch, controlledShutdownCallback)
@@ -709,6 +709,13 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     val leaderAfterShutdown = partitionStateInfo.leader
     assertTrue(leaderAfterShutdown == 1)
     assertEquals(1, partitionStateInfo.isr.size)
+
+    // The test has completed. In order for both brokers to be shutdown, one option is to delete the topic
+    adminZkClient.deleteTopic(topic)
+    controllerId = zkClient.getControllerId.get
+    controller = servers.find(p => p.config.brokerId == controllerId).get.kafkaController
+    TestUtils.waitUntilTrue(() => controller.topicDeletionManager.isTopicQueuedUpForDeletion(topic),
+      s"Deletion of the topic $topic never happened")
   }
 
   @Test
