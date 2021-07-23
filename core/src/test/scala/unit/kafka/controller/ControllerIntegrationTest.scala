@@ -645,6 +645,72 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     TestUtils.waitUntilTrue(() => newController.controllerContext.topicMinIsrConfig.getOrElse(topic, -1) == 1, "Controller never saw min.insync.replicas config change for topic.")
   }
 
+  /**
+   * Test that rolling controlled shutdown of several brokers can be allowed by the availability safety check
+   */
+  @Test
+  def testRollingControlledShutdown(): Unit = {
+    val expectedReplicaAssignment = Map(0  -> List(0, 1))
+    val topic = "test"
+    val partition = 0
+    // create brokers
+    val serverConfigs = TestUtils.createBrokerConfigs(2, zkConnect, true, enableControlledShutdownSafetyCheck = true)
+      .map{props => {
+        props.setProperty(KafkaConfig.ControlledShutdownMaxRetriesProp, "2147483640")
+        props.setProperty(KafkaConfig.ControlledShutdownSafetyCheckRedundancyFactorProp, "0")
+        KafkaConfig.fromProps(props)
+      }
+      }
+
+    servers = serverConfigs.reverseMap(s => TestUtils.createServer(s))
+    TestUtils.waitUntilControllerElected(zkClient)
+
+    // create the topic with min ISR of 2, which should allow one broker to shut down but should block subsequent
+    // shutdowns.
+    //val topicConfig = new Properties()
+    //topicConfig.setProperty(TopicConfig.MIN_IN_SYNC_REPLICAS_CONFIG, "2")
+    //TestUtils.createTopic(zkClient, topic, partitionReplicaAssignment = expectedReplicaAssignment, servers = servers, topicConfig = topicConfig)
+    TestUtils.createTopic(zkClient, topic, partitionReplicaAssignment = expectedReplicaAssignment, servers = servers)
+
+    // Attempt to shut down one broker, which should be allowed with the ISR at 3 and the min ISR of 2
+    val shuttingDownBroker = servers.filter(s => s.config.brokerId == 1).head
+    shuttingDownBroker.shutdown()
+    var activeServers = servers.filter(s => s.config.brokerId != 1)
+    TestUtils.waitUntilTrue(() =>
+      activeServers.forall(_.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic,partition).get.isr.size != 2),
+      "Topic test not created after timeout")
+
+    // start the offline broker
+    shuttingDownBroker.startup()
+    TestUtils.waitUntilTrue(() => {
+      servers.foreach { server =>
+        println(server.config.brokerId + ":" + server.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic, partition).get.isr)
+      }
+
+      servers.forall(_.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic, partition).get.isr.size == 2)
+    },
+      "The ISR does not include the full set after the offline broker is restarted"
+    )
+
+    // now try to shutdown a 2nd broker
+    val controllerId = zkClient.getControllerId.get
+    val controller = servers.find(p => p.config.brokerId == controllerId).get.kafkaController
+    val resultQueue = new LinkedBlockingQueue[Try[collection.Set[TopicPartition]]]()
+    val controlledShutdownCallback = (controlledShutdownResult: Try[collection.Set[TopicPartition]]) => resultQueue.put(controlledShutdownResult)
+    controller.controlledShutdown(0, servers.find(_.config.brokerId == 0).get.kafkaController.brokerEpoch, controlledShutdownCallback)
+    val partitionsRemaining = resultQueue.take().get
+    assertEquals(0, partitionsRemaining.size)
+    activeServers = servers.filter(s => s.config.brokerId != 0)
+    // wait for the update metadata request to trickle to the brokers
+    TestUtils.waitUntilTrue(() =>
+      activeServers.forall(_.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic,partition).get.isr.size != 2),
+      "Topic test not created after timeout")
+    val partitionStateInfo = activeServers.head.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic,partition).get
+    val leaderAfterShutdown = partitionStateInfo.leader
+    assertTrue(leaderAfterShutdown == 1)
+    assertEquals(1, partitionStateInfo.isr.size)
+  }
+
   @Test
   def testTopicsBeingDeletedDoesNotBlockShutdown(): Unit = {
     val expectedReplicaAssignment = Map(0  -> List(0, 1, 2, 3))
